@@ -1,0 +1,71 @@
+# GoReleaser configuration for localias
+# Author: Thiru K
+# Repo: github.com/thirukguru/localias
+
+version: 2
+
+project_name: localias
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: localias
+    main: .
+    binary: localias
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - '^chore:'
+
+release:
+  github:
+    owner: thirukguru
+    name: localias
+  draft: false
+  prerelease: auto
+  name_template: "v{{.Version}}"
+
+brews:
+  - name: localias
+    homepage: https://github.com/thirukguru/localias
+    description: "Local reverse proxy — stable .localhost URLs for development"
+    license: MIT
+    repository:
+      owner: thirukguru
+      name: homebrew-tap
+    install: |
+      bin.install "localias"
