@@ -80,7 +80,7 @@ main() {
     info "Downloading from: ${download_url}"
 
     tmp_dir="$(mktemp -d)"
-    trap 'rm -rf "$tmp_dir"' EXIT
+    trap 'rm -rf "${tmp_dir:-}"' EXIT
 
     curl -fsSL "$download_url" -o "${tmp_dir}/localias.tar.gz" || error "Download failed. Check the version and URL."
 

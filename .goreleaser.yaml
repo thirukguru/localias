@@ -31,12 +31,14 @@ builds:
 
 archives:
   - id: default
-    format: tar.gz
+    formats:
+      - tar.gz
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
-    format_overrides:
+    formats_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
 
 checksum:
   name_template: 'checksums.txt'
@@ -59,13 +61,14 @@ release:
   prerelease: auto
   name_template: "v{{.Version}}"
 
-brews:
-  - name: localias
-    homepage: https://github.com/thirukguru/localias
-    description: "Local reverse proxy — stable .localhost URLs for development"
-    license: MIT
-    repository:
-      owner: thirukguru
-      name: homebrew-tap
-    install: |
-      bin.install "localias"
+# Uncomment after creating the thirukguru/homebrew-tap repo on GitHub:
+# homebrew_casks:
+#   - name: localias
+#     homepage: https://github.com/thirukguru/localias
+#     description: "Local reverse proxy — stable .localhost URLs for development"
+#     license: MIT
+#     repository:
+#       owner: thirukguru
+#       name: homebrew-tap
+#     install: |
+#       bin.install "localias"
