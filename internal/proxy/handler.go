@@ -12,6 +12,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -42,7 +43,7 @@ type Handler struct {
 	logger    *slog.Logger
 	traffic   TrafficRecorder
 	dashboard http.Handler
-	reqCount  uint64
+	reqCount  atomic.Uint64
 }
 
 // NewHandler creates a new proxy handler.
@@ -140,7 +141,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Record traffic
 	latency := time.Since(start)
 	if h.traffic != nil {
-		h.reqCount++
+		id := h.reqCount.Add(1)
 
 		// Capture request headers
 		reqHeaders := make(map[string]string, len(r.Header))
@@ -155,7 +156,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		h.traffic.Record(TrafficEntry{
-			ID:         fmt.Sprintf("req-%d", h.reqCount),
+			ID:         fmt.Sprintf("req-%d", id),
 			Timestamp:  start,
 			Route:      route.Name,
 			Method:     r.Method,

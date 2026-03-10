@@ -94,5 +94,7 @@ func (s *Server) handleLocalhost(w mdns.ResponseWriter, r *mdns.Msg) {
 		}
 	}
 
-	w.WriteMsg(msg)
+	if err := w.WriteMsg(msg); err != nil {
+		s.logger.Debug("failed to write DNS response", "error", err)
+	}
 }

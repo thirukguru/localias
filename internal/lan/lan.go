@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"strings"
+	"sync"
 
 	mdns "github.com/miekg/dns"
 )
@@ -28,6 +29,7 @@ type LANInfo struct {
 type Responder struct {
 	port   int
 	lanIP  string
+	mu     sync.RWMutex
 	names  map[string]bool
 	logger *slog.Logger
 	server *mdns.Server
@@ -52,13 +54,17 @@ func NewResponder(logger *slog.Logger) (*Responder, error) {
 
 // Announce adds a name to the mDNS responder.
 func (r *Responder) Announce(name string) {
+	r.mu.Lock()
 	r.names[strings.ToLower(name)] = true
+	r.mu.Unlock()
 	r.logger.Info("mDNS announcing", "name", name+".local", "ip", r.lanIP)
 }
 
 // Withdraw removes a name from the mDNS responder.
 func (r *Responder) Withdraw(name string) {
+	r.mu.Lock()
 	delete(r.names, strings.ToLower(name))
+	r.mu.Unlock()
 }
 
 // Start begins the mDNS responder (listens on udp 224.0.0.251:5353).
@@ -111,6 +117,9 @@ func (r *Responder) handleQuery(w mdns.ResponseWriter, msg *mdns.Msg) {
 	resp := new(mdns.Msg)
 	resp.SetReply(msg)
 	resp.Authoritative = true
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	for _, q := range msg.Question {
 		name := strings.ToLower(q.Name)

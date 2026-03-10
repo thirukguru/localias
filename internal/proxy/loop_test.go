@@ -75,7 +75,7 @@ func TestIsLoopRequest(t *testing.T) {
 			if tt.header != "" {
 				req.Header.Set("X-Localias-Forwarded", tt.header)
 			}
-			if got := IsLoopRequest(req); got != tt.expected {
+			if got := isLoopRequest(req); got != tt.expected {
 				t.Errorf("IsLoopRequest = %v, want %v", got, tt.expected)
 			}
 		})

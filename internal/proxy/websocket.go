@@ -9,7 +9,6 @@ package proxy
 import (
 	"fmt"
 	"io"
-	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -18,8 +17,15 @@ import (
 
 // isWebSocketUpgrade checks if the request is a WebSocket upgrade request.
 func isWebSocketUpgrade(r *http.Request) bool {
-	return strings.EqualFold(r.Header.Get("Connection"), "upgrade") &&
-		strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
+	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		return false
+	}
+	for _, v := range strings.Split(r.Header.Get("Connection"), ",") {
+		if strings.EqualFold(strings.TrimSpace(v), "upgrade") {
+			return true
+		}
+	}
+	return false
 }
 
 // proxyWebSocket hijacks the client connection and establishes a bidirectional
@@ -74,16 +80,6 @@ func (h *Handler) proxyWebSocket(w http.ResponseWriter, r *http.Request, route *
 	<-errCh
 
 	h.logger.Info("websocket disconnected", "route", route.Name)
-}
-
-// proxyRawTCP is a helper for raw TCP proxy connections (used internally).
-func proxyRawTCP(dst, src net.Conn, logger *slog.Logger) {
-	defer dst.Close()
-	defer src.Close()
-	_, err := io.Copy(dst, src)
-	if err != nil && !isClosedError(err) {
-		logger.Debug("tcp proxy copy error", "error", err)
-	}
 }
 
 // isClosedError checks if an error is a closed connection error.

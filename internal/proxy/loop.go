@@ -27,10 +27,10 @@ func handleLoop(w http.ResponseWriter, routeName string) {
 		Error: "loop_detected",
 		Fix:   "add changeOrigin: true to your proxy config, or remove the proxy middleware that forwards to localias",
 	}
-	json.NewEncoder(w).Encode(resp)
+	json.NewEncoder(w).Encode(resp) //nolint:errcheck // best-effort after status code is set
 }
 
-// IsLoopRequest checks if a request has the loop detection header set.
-func IsLoopRequest(r *http.Request) bool {
+// isLoopRequest checks if a request has the loop detection header set.
+func isLoopRequest(r *http.Request) bool {
 	return r.Header.Get("X-Localias-Forwarded") != ""
 }

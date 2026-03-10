@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -81,7 +82,7 @@ func runProfileStart(cmd *cobra.Command, args []string) error {
 	}
 
 	stDir := GetStateDir()
-	socketPath := stDir + "/localias.sock"
+	socketPath := filepath.Join(stDir, "localias.sock")
 	client := daemon.NewClient(socketPath, stDir, slog.Default())
 
 	fmt.Printf("Starting profile %q (%d services)\n\n", profileName, len(p.Services))
@@ -174,7 +175,7 @@ func runProfileStop(cmd *cobra.Command, args []string) error {
 	}
 
 	stDir := GetStateDir()
-	socketPath := stDir + "/localias.sock"
+	socketPath := filepath.Join(stDir, "localias.sock")
 	client := daemon.NewClient(socketPath, stDir, slog.Default())
 
 	// Get running routes to find PIDs
@@ -245,10 +246,13 @@ func runProfileList(cmd *cobra.Command, args []string) error {
 type prefixWriter struct {
 	prefix string
 	out    *os.File
+	mu     sync.Mutex
 	buf    []byte
 }
 
 func (w *prefixWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.buf = append(w.buf, p...)
 	for {
 		idx := -1

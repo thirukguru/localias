@@ -76,7 +76,10 @@ func ensureToken(stateDir string, logger *slog.Logger) string {
 	token := hex.EncodeToString(b)
 
 	// Save with restrictive permissions (owner-only read)
-	os.MkdirAll(stateDir, 0755)
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		logger.Error("failed to create state dir for MCP token", "error", err)
+		return ""
+	}
 	if err := os.WriteFile(tokenFile, []byte(token+"\n"), 0600); err != nil {
 		logger.Error("failed to write MCP token", "error", err)
 	}
@@ -176,6 +179,8 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB limit
 
 	var req rpcRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -283,7 +288,9 @@ func (s *Server) toolsCall(params json.RawMessage) interface{} {
 
 	case "get_route":
 		var args struct{ Name string `json:"name"` }
-		json.Unmarshal(call.Arguments, &args)
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": "Invalid arguments: " + err.Error()}}, "isError": true}
+		}
 		r, ok := s.routes.Lookup(args.Name)
 		if !ok {
 			return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": "Route not found"}}, "isError": true}
@@ -301,7 +308,9 @@ func (s *Server) toolsCall(params json.RawMessage) interface{} {
 			Name string `json:"name"`
 			Port int    `json:"port"`
 		}
-		json.Unmarshal(call.Arguments, &args)
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": "Invalid arguments: " + err.Error()}}, "isError": true}
+		}
 		r, err := s.routes.Alias(args.Name, args.Port, false)
 		if err != nil {
 			return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": err.Error()}}, "isError": true}
@@ -310,7 +319,9 @@ func (s *Server) toolsCall(params json.RawMessage) interface{} {
 
 	case "health_check":
 		var args struct{ Name string `json:"name"` }
-		json.Unmarshal(call.Arguments, &args)
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": "Invalid arguments: " + err.Error()}}, "isError": true}
+		}
 		r, ok := s.routes.Lookup(args.Name)
 		if !ok {
 			return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": "Route not found"}}, "isError": true}

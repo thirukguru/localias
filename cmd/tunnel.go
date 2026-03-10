@@ -7,6 +7,7 @@ package cmd
 import (
 	"fmt"
 	"log/slog"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/thirukguru/localias/internal/daemon"
@@ -28,7 +29,7 @@ func init() {
 func runTunnel(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	stDir := GetStateDir()
-	socketPath := stDir + "/localias.sock"
+	socketPath := filepath.Join(stDir, "localias.sock")
 	client := daemon.NewClient(socketPath, stDir, slog.Default())
 
 	// Find the route to get the local port

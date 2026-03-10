@@ -10,10 +10,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 )
+
+// validNameRegex allows only lowercase alphanumeric, hyphens, and dots.
+var validNameRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*$`)
 
 // Route represents a single proxy route mapping a name to a backend port.
 type Route struct {
@@ -57,6 +61,9 @@ func (rt *RouteTable) Register(name string, port int, pid int, cmd string) (*Rou
 	if name == "" {
 		return nil, fmt.Errorf("route name cannot be empty")
 	}
+	if !validNameRegex.MatchString(name) {
+		return nil, fmt.Errorf("route name %q contains invalid characters (only a-z, 0-9, hyphens, and dots allowed)", name)
+	}
 
 	scheme := "http"
 	if rt.https {
@@ -84,6 +91,9 @@ func (rt *RouteTable) Alias(name string, port int, force bool) (*Route, error) {
 	name = strings.ToLower(name)
 	if name == "" {
 		return nil, fmt.Errorf("route name cannot be empty")
+	}
+	if !validNameRegex.MatchString(name) {
+		return nil, fmt.Errorf("route name %q contains invalid characters (only a-z, 0-9, hyphens, and dots allowed)", name)
 	}
 
 	if existing, ok := rt.routes[name]; ok && !force {
@@ -198,9 +208,12 @@ func (rt *RouteTable) persistLocked() {
 	}
 	data, err := json.MarshalIndent(staticRoutes, "", "  ")
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "localias: failed to marshal routes: %v\n", err)
 		return
 	}
-	os.WriteFile(rt.persPath, data, 0644)
+	if err := os.WriteFile(rt.persPath, data, 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "localias: failed to persist routes: %v\n", err)
+	}
 }
 
 // loadPersisted loads static routes from routes.json.

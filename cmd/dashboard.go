@@ -33,7 +33,9 @@ func openBrowser(url string) error {
 		return exec.Command("open", url).Start()
 	case "linux":
 		return exec.Command("xdg-open", url).Start()
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 	default:
-		return fmt.Errorf("unsupported OS for browser open")
+		return fmt.Errorf("unsupported OS for browser open: %s", runtime.GOOS)
 	}
 }

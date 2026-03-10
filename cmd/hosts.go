@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -43,7 +44,7 @@ func init() {
 
 func runHostsSync(cmd *cobra.Command, args []string) error {
 	stDir := GetStateDir()
-	socketPath := stDir + "/localias.sock"
+	socketPath := filepath.Join(stDir, "localias.sock")
 	client := daemon.NewClient(socketPath, stDir, slog.Default())
 
 	result, err := client.List()
@@ -69,6 +70,9 @@ func runHostsSync(cmd *cobra.Command, args []string) error {
 	var block strings.Builder
 	block.WriteString(hostsMarkerStart + "\n")
 	for _, r := range result.Routes {
+		if !isValidHostname(r.Name) {
+			continue
+		}
 		block.WriteString(fmt.Sprintf("127.0.0.1  %s.localhost\n", r.Name))
 	}
 	block.WriteString(hostsMarkerEnd + "\n")
@@ -120,4 +124,18 @@ func removeHostsBlock(content string) string {
 	}
 
 	return strings.TrimRight(result.String(), "\n") + "\n"
+}
+
+// isValidHostname checks if a name is safe to use as a hostname.
+// Only allows lowercase alphanumeric characters, hyphens, and dots.
+func isValidHostname(name string) bool {
+	if len(name) == 0 || len(name) > 253 {
+		return false
+	}
+	for _, c := range name {
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '.') {
+			return false
+		}
+	}
+	return true
 }

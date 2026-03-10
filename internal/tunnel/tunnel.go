@@ -31,7 +31,7 @@ func Start(name string, localPort int) error {
 	sshArgs := []string{
 		"-R", fmt.Sprintf("%s:localhost:%d", remotePort, localPort),
 		"-N",        // No remote command
-		"-o", "StrictHostKeyChecking=no",
+		"-o", "StrictHostKeyChecking=accept-new",
 		"-o", "ServerAliveInterval=30",
 		host,
 	}

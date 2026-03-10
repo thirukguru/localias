@@ -8,6 +8,8 @@ package profile
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 
 	"gopkg.in/yaml.v3"
 )
@@ -53,17 +55,17 @@ func FindConfig() (string, error) {
 	}
 
 	for {
-		path := dir + "/localias.yaml"
+		path := filepath.Join(dir, "localias.yaml")
 		if _, err := os.Stat(path); err == nil {
 			return path, nil
 		}
-		path = dir + "/localias.yml"
+		path = filepath.Join(dir, "localias.yml")
 		if _, err := os.Stat(path); err == nil {
 			return path, nil
 		}
 
-		parent := dir[:max(0, len(dir)-len("/"+dir[lastSlash(dir)+1:]))]
-		if parent == dir || parent == "" {
+		parent := filepath.Dir(dir)
+		if parent == dir {
 			break
 		}
 		dir = parent
@@ -72,21 +74,6 @@ func FindConfig() (string, error) {
 	return "", fmt.Errorf("localias.yaml not found in current or parent directories")
 }
 
-func lastSlash(s string) int {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == '/' {
-			return i
-		}
-	}
-	return -1
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
 
 // GetProfile returns a profile by name, defaulting to "default".
 func (c *Config) GetProfile(name string) (*Profile, error) {
@@ -106,5 +93,6 @@ func (c *Config) ListProfiles() []string {
 	for name := range c.Profiles {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return names
 }

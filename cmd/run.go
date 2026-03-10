@@ -6,11 +6,13 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -83,7 +85,7 @@ func runWithName(name string, args []string) error {
 	appURL := fmt.Sprintf("%s://%s.localhost:%d", scheme, name, proxyP)
 
 	// Connect to daemon
-	socketPath := stDir + "/localias.sock"
+	socketPath := filepath.Join(stDir, "localias.sock")
 	client := daemon.NewClient(socketPath, stDir, slog.Default())
 
 	// Register route
@@ -166,24 +168,33 @@ func runDirect(args []string) error {
 func writeRoutesJSON(client *daemon.Client) {
 	result, err := client.List()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to list routes: %v\n", err)
 		return
 	}
-	data := "[\n"
-	for i, r := range result.Routes {
-		data += fmt.Sprintf("  {\"name\": %q, \"url\": %q, \"port\": %d}", r.Name, r.URL, r.Port)
-		if i < len(result.Routes)-1 {
-			data += ","
-		}
-		data += "\n"
+	type routeEntry struct {
+		Name string `json:"name"`
+		URL  string `json:"url"`
+		Port int    `json:"port"`
 	}
-	data += "]\n"
-	os.WriteFile("localias-routes.json", []byte(data), 0644)
+	entries := make([]routeEntry, len(result.Routes))
+	for i, r := range result.Routes {
+		entries[i] = routeEntry{Name: r.Name, URL: r.URL, Port: r.Port}
+	}
+	data, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to marshal routes: %v\n", err)
+		return
+	}
+	if err := os.WriteFile("localias-routes.json", append(data, '\n'), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to write routes JSON: %v\n", err)
+	}
 }
 
 // syncHostsQuietly silently syncs routes to /etc/hosts.
 func syncHostsQuietly(client *daemon.Client) {
 	result, err := client.List()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to list routes for hosts sync: %v\n", err)
 		return
 	}
 	if len(result.Routes) == 0 {
@@ -192,6 +203,9 @@ func syncHostsQuietly(client *daemon.Client) {
 	// Build hosts block
 	block := "# BEGIN localias managed block\n"
 	for _, r := range result.Routes {
+		if !isValidHostname(r.Name) {
+			continue
+		}
 		block += fmt.Sprintf("127.0.0.1  %s.localhost\n", r.Name)
 	}
 	block += "# END localias managed block\n"
@@ -201,7 +215,9 @@ func syncHostsQuietly(client *daemon.Client) {
 		return
 	}
 	cleaned := removeLocaliasBlock(string(content))
-	os.WriteFile("/etc/hosts", []byte(cleaned+"\n"+block), 0644)
+	if err := os.WriteFile("/etc/hosts", []byte(cleaned+"\n"+block), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to write /etc/hosts: %v\n", err)
+	}
 }
 
 // removeLocaliasBlock removes the localias managed block from hosts content.

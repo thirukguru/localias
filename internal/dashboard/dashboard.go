@@ -100,7 +100,9 @@ func (d *Dashboard) handleRoutes(w http.ResponseWriter, r *http.Request) {
 		result = append(result, rr)
 	}
 
-	json.NewEncoder(w).Encode(result)
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		d.logger.Error("failed to encode routes response", "error", err)
+	}
 }
 
 // handleTraffic returns recent traffic entries.
@@ -109,7 +111,9 @@ func (d *Dashboard) handleTraffic(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	if d.traffic == nil {
-		json.NewEncoder(w).Encode([]struct{}{})
+		if err := json.NewEncoder(w).Encode([]struct{}{}); err != nil {
+			d.logger.Error("failed to encode empty traffic response", "error", err)
+		}
 		return
 	}
 
@@ -118,7 +122,9 @@ func (d *Dashboard) handleTraffic(w http.ResponseWriter, r *http.Request) {
 	if entries == nil {
 		entries = []traffic.Entry{}
 	}
-	json.NewEncoder(w).Encode(entries)
+	if err := json.NewEncoder(w).Encode(entries); err != nil {
+		d.logger.Error("failed to encode traffic response", "error", err)
+	}
 }
 
 // handleTrafficStream provides SSE stream of new traffic entries.
@@ -160,11 +166,15 @@ func (d *Dashboard) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	if d.health == nil {
-		json.NewEncoder(w).Encode(map[string]interface{}{})
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{}); err != nil {
+			d.logger.Error("failed to encode empty health response", "error", err)
+		}
 		return
 	}
 
-	json.NewEncoder(w).Encode(d.health.GetAllStatuses())
+	if err := json.NewEncoder(w).Encode(d.health.GetAllStatuses()); err != nil {
+		d.logger.Error("failed to encode health response", "error", err)
+	}
 }
 
 // handleStatic serves the embedded dashboard HTML.

@@ -143,7 +143,9 @@ func (s *RPCServer) Start(ctx context.Context) error {
 		return fmt.Errorf("listening on %s: %w", s.socketPath, err)
 	}
 	s.listener = ln
-	os.Chmod(s.socketPath, 0660)
+	if err := os.Chmod(s.socketPath, 0660); err != nil {
+		s.logger.Warn("failed to set socket permissions", "error", err)
+	}
 
 	s.logger.Info("RPC server started", "socket", s.socketPath)
 
@@ -152,6 +154,9 @@ func (s *RPCServer) Start(ctx context.Context) error {
 		<-ctx.Done()
 		ln.Close()
 	}()
+
+	// Semaphore limiting concurrent connections
+	sem := make(chan struct{}, 100)
 
 	for {
 		conn, err := ln.Accept()
@@ -165,8 +170,10 @@ func (s *RPCServer) Start(ctx context.Context) error {
 				continue
 			}
 		}
+		sem <- struct{}{} // blocks if at capacity
 		s.wg.Add(1)
 		go func() {
+			defer func() { <-sem }()
 			defer s.wg.Done()
 			s.handleConn(conn)
 		}()

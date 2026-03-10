@@ -8,6 +8,7 @@ package cmd
 import (
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -35,7 +36,7 @@ func init() {
 
 func runAlias(cmd *cobra.Command, args []string) error {
 	stDir := GetStateDir()
-	socketPath := stDir + "/localias.sock"
+	socketPath := filepath.Join(stDir, "localias.sock")
 	client := daemon.NewClient(socketPath, stDir, slog.Default())
 
 	// Handle --remove
