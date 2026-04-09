@@ -21,8 +21,9 @@
 9. [Hosts File Sync](#hosts-file-sync)
 10. [Health Checks](#health-checks)
 11. [SSH Tunnels](#ssh-tunnels)
-12. [Environment Variables](#environment-variables)
-13. [Tips & Troubleshooting](#tips--troubleshooting)
+12. [MCP (AI Agent Integration)](#mcp-ai-agent-integration)
+13. [Environment Variables](#environment-variables)
+14. [Tips & Troubleshooting](#tips--troubleshooting)
 
 ---
 
@@ -166,6 +167,8 @@ localias run --share-lan -- npm run dev
 | `PORT` | `4000` | The assigned port |
 | `HOST` | `127.0.0.1` | Bind address |
 | `LOCALIAS_URL` | `http://myapp.localhost:7777` | The full proxy URL |
+| `LOCALIAS_MCP_TOKEN` | `a3f2...` | Scoped MCP token for this route |
+| `LOCALIAS_MCP_URL` | `http://mcp.localhost:7777` | MCP server URL |
 
 **Framework auto-detection:**
 
@@ -547,21 +550,49 @@ Output:
 
 ## MCP (AI Agent Integration)
 
-Localias includes an MCP (Model Context Protocol) server so AI coding agents can discover your running services.
+Localias includes an MCP (Model Context Protocol) server so AI coding agents can discover your running services. It supports **scoped tokens** for per-route access control.
 
 ### Authentication
 
-The MCP server uses **bearer token authentication**.
+The MCP server supports two types of tokens:
 
-- A random 64-character hex token is generated on first daemon start
-- Token is saved to `~/.localias/mcp-token` (mode `0600`, owner-only)
-- All MCP requests must include `Authorization: Bearer <token>`
-
-### View your token
-
+**1. Admin Token** — full access to all routes and tools:
 ```bash
 cat ~/.localias/mcp-token
 ```
+
+**2. Scoped Tokens** — restricted to specific routes and capabilities:
+```bash
+# Create a token for specific routes
+localias mcp token create --routes frontend,api --capabilities read,health
+
+# Create a read-only token for all routes
+localias mcp token create --routes '*' --capabilities read --label "monitoring agent"
+
+# List all scoped tokens
+localias mcp token list
+
+# Revoke by prefix
+localias mcp token revoke a3f2
+```
+
+**3. Ephemeral Tokens** — auto-issued and auto-revoked:
+
+When you use `localias run`, an ephemeral token is automatically:
+- Created — scoped to the launched route with `read` + `health` capabilities
+- Injected — as `LOCALIAS_MCP_TOKEN` and `LOCALIAS_MCP_URL` in the child process environment
+- Revoked — automatically when the process exits (tracked by PID)
+
+This means each agent-launched process gets its own identity and can only see the routes it's authorized to touch.
+
+### Token Capabilities
+
+| Capability | What it allows |
+|-----------|----------------|
+| `read` | `list_routes` (filtered to allowed routes), `get_route` |
+| `write` | `register_route` (only for allowed route names) |
+| `health` | `health_check` (only for allowed routes) |
+| `*` | Full admin access (admin token only) |
 
 ### Configure Cursor / Claude Desktop
 
@@ -571,7 +602,7 @@ Add this to your MCP settings:
 {
   "mcpServers": {
     "localias": {
-      "url": "http://localias.localhost:7777/mcp",
+      "url": "http://mcp.localhost:7777/mcp",
       "headers": {
         "Authorization": "Bearer <paste your token here>"
       }
@@ -584,41 +615,64 @@ Add this to your MCP settings:
 
 | Tool | What it does |
 |------|-------------|
-| `list_routes` | List all active routes with health status |
+| `list_routes` | List all active routes with health status (filtered by token scope) |
 | `get_route` | Get details for a specific route + recent traffic |
-| `register_route` | Register a new static alias |
+| `register_route` | Register a new static alias (requires `write` capability) |
 | `health_check` | Run an immediate health check |
+
+### MCP Token Management
+
+```bash
+# Create a persistent token with specific routes and capabilities
+localias mcp token create --routes frontend,api --capabilities read,health --label "CI agent"
+# → ✓ Scoped MCP token created
+# →   Token: a3f2b8c9d1e4f5a6b7c8d9e0f1a2b3c4...
+# →   Routes: frontend, api
+# →   Capabilities: read, health
+
+# List all tokens (shows prefix, routes, caps, PID for ephemeral)
+localias mcp token list
+# → Scoped MCP tokens (3):
+# →   a3f2b8c9…  routes=[frontend,api]  caps=[read,health]  CI agent
+# →   b1c2d3e4…  routes=[myapp]         caps=[read,health]  ephemeral:myapp  PID: 12345 (ephemeral)
+# →   c5d6e7f8…  routes=[*]             caps=[read]         monitoring agent
+
+# Revoke tokens matching a prefix
+localias mcp token revoke a3f2
+# → ✓ Revoked 1 token(s) matching "a3f2"
+```
 
 ### Test with curl
 
 ```bash
-# Get your token
+# Get your admin token
 TOKEN=$(cat ~/.localias/mcp-token)
 
 # List available tools
-curl -s -X POST http://localias.localhost:7777/mcp/message \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
+curl -s -X POST http://mcp.localhost:7777/mcp/message \\
+  -H "Authorization: Bearer $TOKEN" \\
+  -H "Content-Type: application/json" \\
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 
 # Call list_routes
-curl -s -X POST http://localias.localhost:7777/mcp/message \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
+curl -s -X POST http://mcp.localhost:7777/mcp/message \\
+  -H "Authorization: Bearer $TOKEN" \\
+  -H "Content-Type: application/json" \\
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_routes","arguments":{}}}'
 
 # Without token (rejected)
-curl -s -X POST http://localias.localhost:7777/mcp/message \
+curl -s -X POST http://mcp.localhost:7777/mcp/message \\
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 # → {"error":"Authorization header required..."}
 ```
 
 ### Security Notes
 
-- Token file is `0600` (only your user can read it)
+- Admin token file is `0600` (only your user can read it)
 - MCP only listens on `localhost` — not exposed to the network
-- Token persists across daemon restarts (same token until you delete the file)
-- To regenerate: `rm ~/.localias/mcp-token && localias proxy stop && localias proxy start`
+- Scoped tokens are stored in `~/.localias/mcp-tokens.json` (also `0600`)
+- Ephemeral tokens auto-revoke when their PID exits
+- To regenerate admin token: `rm ~/.localias/mcp-token && localias proxy stop && localias proxy start`
 
 ---
 
@@ -633,6 +687,8 @@ curl -s -X POST http://localias.localhost:7777/mcp/message \
 | `LOCALIAS_TUNNEL_HOST` | _(none)_ | SSH relay server for tunnels |
 | `LOCALIAS_APP_PORT` | _(auto)_ | Force a specific app port |
 | `LOCALIAS=0` | _(enabled)_ | Set to `0` to disable localias (passthrough) |
+| `LOCALIAS_MCP_TOKEN` | _(auto)_ | Scoped MCP token (injected by `localias run`) |
+| `LOCALIAS_MCP_URL` | _(auto)_ | MCP endpoint URL (injected by `localias run`) |
 
 **Usage example:**
 ```bash
@@ -751,6 +807,11 @@ localias proxy stop
 localias profile start [--profile <name>]
 localias profile stop [--profile <name>]
 localias profile list
+
+# MCP tokens
+localias mcp token create --routes <routes> --capabilities <caps>
+localias mcp token list
+localias mcp token revoke <prefix>
 
 # Utilities
 localias dashboard

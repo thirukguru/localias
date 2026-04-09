@@ -93,6 +93,9 @@ localias dashboard
 | `localias profile start` | Start services from `localias.yaml` |
 | `localias profile list` | List available profiles |
 | `localias dashboard` | Open web dashboard in browser |
+| `localias mcp token create` | Create a scoped MCP token |
+| `localias mcp token list` | List all scoped MCP tokens |
+| `localias mcp token revoke` | Revoke tokens by prefix |
 | `localias tunnel <name>` | Expose via tunnel (coming soon) |
 
 ## Profiles (`localias.yaml`)
@@ -123,24 +126,46 @@ localias profile start --profile default
 | `LOCALIAS_APP_PORT` | Fixed app port | auto |
 | `LOCALIAS_SYNC_HOSTS` | Auto-sync `/etc/hosts` | `0` |
 | `LOCALIAS=0` | Disable localias | enabled |
+| `LOCALIAS_MCP_TOKEN` | Scoped MCP token (injected by `run`) | auto |
+| `LOCALIAS_MCP_URL` | MCP server URL (injected by `run`) | auto |
 
 ## MCP (AI Agent Integration)
 
 Localias exposes an MCP server for AI agents (Cursor, Claude Desktop, etc.) to discover local services.
 
-**Authentication:** Bearer token, auto-generated on first run.
+### Authentication
+
+**Admin token** — auto-generated, full access to all routes:
 
 ```bash
-# View your token
 cat ~/.localias/mcp-token
 ```
 
-**MCP config for Cursor / Claude Desktop:**
+**Scoped tokens** — per-route, per-capability tokens for agent isolation:
+
+```bash
+# Create a token scoped to specific routes
+localias mcp token create --routes frontend,api --capabilities read,health
+
+# Create a read-only token for all routes
+localias mcp token create --routes '*' --capabilities read --label "monitoring"
+
+# List all scoped tokens
+localias mcp token list
+
+# Revoke by prefix
+localias mcp token revoke a3f2
+```
+
+**Ephemeral tokens** — when you run `localias run`, a scoped token is automatically issued for that route and injected as `LOCALIAS_MCP_TOKEN` into the child process. It auto-revokes when the process exits.
+
+### MCP config for Cursor / Claude Desktop
+
 ```json
 {
   "mcpServers": {
     "localias": {
-      "url": "http://localias.localhost:7777/mcp",
+      "url": "http://mcp.localhost:7777/mcp",
       "headers": {
         "Authorization": "Bearer <paste token from ~/.localias/mcp-token>"
       }
@@ -148,6 +173,15 @@ cat ~/.localias/mcp-token
   }
 }
 ```
+
+### Token Capabilities
+
+| Capability | MCP Tools Allowed |
+|-----------|-------------------|
+| `read` | `list_routes` (filtered), `get_route` (if in scope) |
+| `write` | `register_route` (if route name in scope) |
+| `health` | `health_check` (if route in scope) |
+| `*` | Full admin access (admin token) |
 
 **Available tools:** `list_routes`, `get_route`, `register_route`, `health_check`
 

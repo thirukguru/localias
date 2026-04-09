@@ -43,6 +43,7 @@ type Handler struct {
 	logger    *slog.Logger
 	traffic   TrafficRecorder
 	dashboard http.Handler
+	mcp       http.Handler
 	reqCount  atomic.Uint64
 }
 
@@ -58,6 +59,11 @@ func NewHandler(routes *RouteTable, logger *slog.Logger, traffic TrafficRecorder
 // SetDashboard sets the dashboard handler for localias.localhost requests.
 func (h *Handler) SetDashboard(dashboard http.Handler) {
 	h.dashboard = dashboard
+}
+
+// SetMCP sets the MCP server handler for mcp.localhost requests.
+func (h *Handler) SetMCP(mcpHandler http.Handler) {
+	h.mcp = mcpHandler
 }
 
 // ServeHTTP routes incoming requests to the appropriate backend.
@@ -80,6 +86,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.Error(w, "Dashboard not configured", http.StatusNotFound)
+		return
+	}
+
+	// Check for MCP route
+	if name == "mcp" {
+		if h.mcp != nil {
+			h.mcp.ServeHTTP(w, r)
+			return
+		}
+		http.Error(w, "MCP server not configured", http.StatusNotFound)
 		return
 	}
 

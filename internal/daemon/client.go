@@ -163,6 +163,40 @@ func (c *Client) StopDaemon() error {
 	return c.Call("stop", nil, nil)
 }
 
+// MCPTokenCreate creates a scoped MCP token via the daemon.
+func (c *Client) MCPTokenCreate(routes, capabilities []string, pid int, label string) (*MCPTokenCreateResult, error) {
+	params := MCPTokenCreateParams{
+		Routes:       routes,
+		Capabilities: capabilities,
+		PID:          pid,
+		Label:        label,
+	}
+	var result MCPTokenCreateResult
+	if err := c.Call("mcp.token.create", params, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// MCPTokenList lists all scoped MCP tokens via the daemon.
+func (c *Client) MCPTokenList() (*MCPTokenListResult, error) {
+	var result MCPTokenListResult
+	if err := c.Call("mcp.token.list", nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// MCPTokenRevoke revokes MCP tokens matching the given prefix.
+func (c *Client) MCPTokenRevoke(prefix string) (*MCPTokenRevokeResult, error) {
+	params := MCPTokenRevokeParams{Prefix: prefix}
+	var result MCPTokenRevokeResult
+	if err := c.Call("mcp.token.revoke", params, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // connect establishes a connection to the daemon, auto-starting it if necessary.
 func (c *Client) connect() (net.Conn, error) {
 	// Try direct connection first

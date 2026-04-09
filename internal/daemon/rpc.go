@@ -101,6 +101,44 @@ type TrafficParams struct {
 	Route string `json:"route"`
 }
 
+// MCPTokenCreateParams are the parameters for the "mcp.token.create" RPC method.
+type MCPTokenCreateParams struct {
+	Routes       []string `json:"routes"`
+	Capabilities []string `json:"capabilities"`
+	PID          int      `json:"pid,omitempty"`
+	Label        string   `json:"label,omitempty"`
+}
+
+// MCPTokenCreateResult is the result of the "mcp.token.create" RPC method.
+type MCPTokenCreateResult struct {
+	Token string `json:"token"`
+}
+
+// MCPTokenListResult is the result of the "mcp.token.list" RPC method.
+type MCPTokenListResult struct {
+	Tokens []MCPTokenInfo `json:"tokens"`
+}
+
+// MCPTokenInfo contains summary info about a scoped MCP token.
+type MCPTokenInfo struct {
+	Prefix       string   `json:"prefix"`
+	Routes       []string `json:"routes"`
+	Capabilities []string `json:"capabilities"`
+	PID          int      `json:"pid,omitempty"`
+	Label        string   `json:"label,omitempty"`
+	CreatedAt    string   `json:"created_at"`
+}
+
+// MCPTokenRevokeParams are the parameters for the "mcp.token.revoke" RPC method.
+type MCPTokenRevokeParams struct {
+	Prefix string `json:"prefix"`
+}
+
+// MCPTokenRevokeResult is the result of the "mcp.token.revoke" RPC method.
+type MCPTokenRevokeResult struct {
+	Revoked int `json:"revoked"`
+}
+
 // RPCHandler is a function that handles an RPC method call.
 type RPCHandler func(params json.RawMessage) (interface{}, error)
 

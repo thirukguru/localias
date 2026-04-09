@@ -76,6 +76,11 @@ func (s *Server) SetDashboard(h http.Handler) {
 	s.handler.SetDashboard(h)
 }
 
+// SetMCP sets the MCP server handler for mcp.localhost.
+func (s *Server) SetMCP(h http.Handler) {
+	s.handler.SetMCP(h)
+}
+
 // Start starts the proxy server. It blocks until the server is stopped.
 func (s *Server) Start(ctx context.Context) error {
 	addr := fmt.Sprintf("127.0.0.1:%d", s.config.Port)

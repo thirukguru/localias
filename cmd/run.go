@@ -94,6 +94,20 @@ func runWithName(name string, args []string) error {
 		return fmt.Errorf("registering route: %w", err)
 	}
 
+	// Issue ephemeral scoped MCP token for this route
+	var mcpToken string
+	tokenResult, err := client.MCPTokenCreate(
+		[]string{name},
+		[]string{"read", "health"},
+		os.Getpid(),
+		fmt.Sprintf("ephemeral:%s", name),
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to create ephemeral MCP token: %v\n", err)
+	} else {
+		mcpToken = tokenResult.Token
+	}
+
 	// Print URL
 	fmt.Printf("→ %s\n", result.URL)
 	fmt.Printf("  Backend: 127.0.0.1:%d\n", appPort)
@@ -119,11 +133,18 @@ func runWithName(name string, args []string) error {
 	child.Stdin = os.Stdin
 
 	// Set env vars
-	child.Env = append(os.Environ(),
+	childEnv := append(os.Environ(),
 		fmt.Sprintf("PORT=%d", appPort),
 		"HOST=127.0.0.1",
 		fmt.Sprintf("LOCALIAS_URL=%s", appURL),
 	)
+	if mcpToken != "" {
+		childEnv = append(childEnv,
+			fmt.Sprintf("LOCALIAS_MCP_TOKEN=%s", mcpToken),
+			fmt.Sprintf("LOCALIAS_MCP_URL=http://mcp.localhost:%d", proxyP),
+		)
+	}
+	child.Env = childEnv
 
 	// Forward signals to child
 	sigCh := make(chan os.Signal, 1)

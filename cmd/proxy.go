@@ -20,6 +20,7 @@ import (
 	"github.com/thirukguru/localias/internal/daemon"
 	"github.com/thirukguru/localias/internal/dashboard"
 	"github.com/thirukguru/localias/internal/health"
+	"github.com/thirukguru/localias/internal/mcp"
 	"github.com/thirukguru/localias/internal/proxy"
 	"github.com/thirukguru/localias/internal/traffic"
 )
@@ -158,7 +159,12 @@ func runProxyForeground(dir string, port int) error {
 
 	// Create and start RPC server
 	rpcServer := daemon.NewRPCServer(d.SocketPath(), logger)
-	registerRPCHandlers(rpcServer, srv.Routes(), healthChecker, trafficLogger, logger)
+
+	// Create MCP server with token store
+	mcpSrv := mcp.NewServer(srv.Routes(), healthChecker, trafficLogger, logger, dir)
+	srv.SetMCP(mcpSrv.Handler())
+
+	registerRPCHandlers(rpcServer, srv.Routes(), healthChecker, trafficLogger, mcpSrv.TokenStore(), logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -182,7 +188,7 @@ func runProxyForeground(dir string, port int) error {
 	return srv.Start(ctx)
 }
 
-func registerRPCHandlers(rpcServer *daemon.RPCServer, routes *proxy.RouteTable, hc *health.Checker, tl *traffic.Logger, logger *slog.Logger) {
+func registerRPCHandlers(rpcServer *daemon.RPCServer, routes *proxy.RouteTable, hc *health.Checker, tl *traffic.Logger, ts *mcp.TokenStore, logger *slog.Logger) {
 	rpcServer.Handle("register", func(params json.RawMessage) (interface{}, error) {
 		var p daemon.RegisterParams
 		if err := json.Unmarshal(params, &p); err != nil {
@@ -291,6 +297,50 @@ func registerRPCHandlers(rpcServer *daemon.RPCServer, routes *proxy.RouteTable, 
 			p.Signal(syscall.SIGTERM)
 		}()
 		return struct{}{}, nil
+	})
+
+	// MCP scoped token management
+	rpcServer.Handle("mcp.token.create", func(params json.RawMessage) (interface{}, error) {
+		var p daemon.MCPTokenCreateParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		st := ts.Create(p.Routes, p.Capabilities, p.PID, p.Label)
+		if st == nil {
+			return nil, fmt.Errorf("failed to create MCP token")
+		}
+		return daemon.MCPTokenCreateResult{Token: st.Token}, nil
+	})
+
+	rpcServer.Handle("mcp.token.list", func(params json.RawMessage) (interface{}, error) {
+		tokens := ts.List()
+		result := daemon.MCPTokenListResult{
+			Tokens: make([]daemon.MCPTokenInfo, len(tokens)),
+		}
+		for i, t := range tokens {
+			prefix := t.Token
+			if len(prefix) > 8 {
+				prefix = prefix[:8]
+			}
+			result.Tokens[i] = daemon.MCPTokenInfo{
+				Prefix:       prefix,
+				Routes:       t.Routes,
+				Capabilities: t.Capabilities,
+				PID:          t.PID,
+				Label:        t.Label,
+				CreatedAt:    t.CreatedAt.Format("2006-01-02 15:04:05"),
+			}
+		}
+		return result, nil
+	})
+
+	rpcServer.Handle("mcp.token.revoke", func(params json.RawMessage) (interface{}, error) {
+		var p daemon.MCPTokenRevokeParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		count := ts.Revoke(p.Prefix)
+		return daemon.MCPTokenRevokeResult{Revoked: count}, nil
 	})
 }
 

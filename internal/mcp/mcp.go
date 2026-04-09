@@ -7,6 +7,7 @@
 package mcp
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -23,30 +24,43 @@ import (
 	"github.com/thirukguru/localias/internal/traffic"
 )
 
+// contextKey is an unexported type for context keys in this package.
+type contextKey int
+
+const scopedTokenKey contextKey = iota
+
 // Server implements the MCP protocol over HTTP SSE.
 type Server struct {
-	routes  *proxy.RouteTable
-	health  *health.Checker
-	traffic *traffic.Logger
-	logger  *slog.Logger
-	token   string
-	idGen   atomic.Int64
+	routes     *proxy.RouteTable
+	health     *health.Checker
+	traffic    *traffic.Logger
+	logger     *slog.Logger
+	adminToken string
+	tokenStore *TokenStore
+	idGen      atomic.Int64
 }
 
 // NewServer creates a new MCP server.
-// stateDir is used to store/load the bearer token.
+// stateDir is used to store/load the bearer token and scoped tokens.
 func NewServer(routes *proxy.RouteTable, h *health.Checker, t *traffic.Logger, logger *slog.Logger, stateDir string) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	token := ensureToken(stateDir, logger)
+	adminToken := ensureToken(stateDir, logger)
+	tokenStore := NewTokenStore(stateDir, logger)
 	return &Server{
-		routes:  routes,
-		health:  h,
-		traffic: t,
-		logger:  logger,
-		token:   token,
+		routes:     routes,
+		health:     h,
+		traffic:    t,
+		logger:     logger,
+		adminToken: adminToken,
+		tokenStore: tokenStore,
 	}
+}
+
+// TokenStore returns the token store for external use (e.g., RPC handlers).
+func (s *Server) TokenStore() *TokenStore {
+	return s.tokenStore
 }
 
 // TokenPath returns the path to the MCP token file.
@@ -97,11 +111,22 @@ func (s *Server) Handler() http.Handler {
 }
 
 // requireAuth wraps an HTTP handler with bearer token validation.
+// Resolves the token as admin (global token) or scoped (TokenStore) and
+// injects the ScopedToken into the request context.
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
+	// Pre-build admin ScopedToken for the global token
+	adminScoped := &ScopedToken{
+		Token:        s.adminToken,
+		Routes:       []string{"*"},
+		Capabilities: []string{CapAll},
+		Label:        "admin",
+	}
+
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.token == "" {
-			// No token configured — allow all (fallback)
-			next(w, r)
+		if s.adminToken == "" {
+			// No token configured — allow all (fallback) with admin scope
+			ctx := context.WithValue(r.Context(), scopedTokenKey, adminScoped)
+			next(w, r.WithContext(ctx))
 			return
 		}
 
@@ -112,15 +137,48 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		parts := strings.SplitN(auth, " ", 2)
-		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || parts[1] != s.token {
-			s.logger.Warn("MCP request rejected: invalid token", "remote", r.RemoteAddr)
-			http.Error(w, `{"error":"Invalid bearer token. Read token from: ~/.localias/mcp-token"}`, http.StatusUnauthorized)
+		bearer := extractBearer(auth)
+		if bearer == "" {
+			s.logger.Warn("MCP request rejected: malformed Authorization header", "remote", r.RemoteAddr)
+			http.Error(w, `{"error":"Invalid Authorization header format. Use: Bearer <token>"}`, http.StatusUnauthorized)
 			return
 		}
 
-		next(w, r)
+		// Try admin token first (backward compat)
+		if bearer == s.adminToken {
+			ctx := context.WithValue(r.Context(), scopedTokenKey, adminScoped)
+			next(w, r.WithContext(ctx))
+			return
+		}
+
+		// Try scoped token
+		scoped := s.tokenStore.Resolve(bearer)
+		if scoped != nil {
+			ctx := context.WithValue(r.Context(), scopedTokenKey, scoped)
+			next(w, r.WithContext(ctx))
+			return
+		}
+
+		s.logger.Warn("MCP request rejected: invalid token", "remote", r.RemoteAddr)
+		http.Error(w, `{"error":"Invalid bearer token."}`, http.StatusUnauthorized)
 	}
+}
+
+// extractBearer extracts the bearer token from an Authorization header value.
+func extractBearer(auth string) string {
+	parts := strings.SplitN(auth, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
+}
+
+// tokenFromContext retrieves the ScopedToken from the request context.
+func tokenFromContext(ctx context.Context) *ScopedToken {
+	if st, ok := ctx.Value(scopedTokenKey).(*ScopedToken); ok {
+		return st
+	}
+	return nil
 }
 
 // JSON-RPC types
@@ -206,7 +264,8 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 	case "tools/list":
 		resp.Result = s.toolsList()
 	case "tools/call":
-		resp.Result = s.toolsCall(req.Params)
+		token := tokenFromContext(r.Context())
+		resp.Result = s.toolsCall(req.Params, token)
 	default:
 		resp.Error = &rpcError{Code: -32601, Message: "Method not found: " + req.Method}
 	}
@@ -256,7 +315,7 @@ func (s *Server) toolsList() interface{} {
 	}
 }
 
-func (s *Server) toolsCall(params json.RawMessage) interface{} {
+func (s *Server) toolsCall(params json.RawMessage, token *ScopedToken) interface{} {
 	var call struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
@@ -267,9 +326,15 @@ func (s *Server) toolsCall(params json.RawMessage) interface{} {
 
 	switch call.Name {
 	case "list_routes":
+		if !token.HasCapability(CapRead) {
+			return mcpError("Permission denied: requires 'read' capability")
+		}
 		routes := s.routes.List()
-		result := make([]map[string]interface{}, len(routes))
-		for i, r := range routes {
+		var result []map[string]interface{}
+		for _, r := range routes {
+			if !token.CanAccessRoute(r.Name) {
+				continue // filter to scoped routes
+			}
 			entry := map[string]interface{}{
 				"name":         r.Name,
 				"url":          r.URL,
@@ -281,19 +346,28 @@ func (s *Server) toolsCall(params json.RawMessage) interface{} {
 					entry["latency"] = status.Latency.String()
 				}
 			}
-			result[i] = entry
+			result = append(result, entry)
+		}
+		if result == nil {
+			result = []map[string]interface{}{}
 		}
 		data, _ := json.Marshal(result)
 		return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": string(data)}}}
 
 	case "get_route":
+		if !token.HasCapability(CapRead) {
+			return mcpError("Permission denied: requires 'read' capability")
+		}
 		var args struct{ Name string `json:"name"` }
 		if err := json.Unmarshal(call.Arguments, &args); err != nil {
-			return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": "Invalid arguments: " + err.Error()}}, "isError": true}
+			return mcpError("Invalid arguments: " + err.Error())
+		}
+		if !token.CanAccessRoute(args.Name) {
+			return mcpError("Permission denied: route not in scope")
 		}
 		r, ok := s.routes.Lookup(args.Name)
 		if !ok {
-			return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": "Route not found"}}, "isError": true}
+			return mcpError("Route not found")
 		}
 		result := map[string]interface{}{"name": r.Name, "url": r.URL, "backend_port": r.Port}
 		if s.traffic != nil {
@@ -304,36 +378,56 @@ func (s *Server) toolsCall(params json.RawMessage) interface{} {
 		return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": string(data)}}}
 
 	case "register_route":
+		if !token.HasCapability(CapWrite) {
+			return mcpError("Permission denied: requires 'write' capability")
+		}
 		var args struct {
 			Name string `json:"name"`
 			Port int    `json:"port"`
 		}
 		if err := json.Unmarshal(call.Arguments, &args); err != nil {
-			return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": "Invalid arguments: " + err.Error()}}, "isError": true}
+			return mcpError("Invalid arguments: " + err.Error())
+		}
+		if !token.CanAccessRoute(args.Name) {
+			return mcpError("Permission denied: route name not in scope")
 		}
 		r, err := s.routes.Alias(args.Name, args.Port, false)
 		if err != nil {
-			return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": err.Error()}}, "isError": true}
+			return mcpError(err.Error())
 		}
 		return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": "Registered: " + r.URL}}}
 
 	case "health_check":
+		if !token.HasCapability(CapHealth) {
+			return mcpError("Permission denied: requires 'health' capability")
+		}
 		var args struct{ Name string `json:"name"` }
 		if err := json.Unmarshal(call.Arguments, &args); err != nil {
-			return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": "Invalid arguments: " + err.Error()}}, "isError": true}
+			return mcpError("Invalid arguments: " + err.Error())
+		}
+		if !token.CanAccessRoute(args.Name) {
+			return mcpError("Permission denied: route not in scope")
 		}
 		r, ok := s.routes.Lookup(args.Name)
 		if !ok {
-			return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": "Route not found"}}, "isError": true}
+			return mcpError("Route not found")
 		}
 		if s.health == nil {
-			return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": "Health checker not available"}}, "isError": true}
+			return mcpError("Health checker not available")
 		}
 		status := s.health.CheckNow(args.Name, r.Port)
 		data, _ := json.Marshal(status)
 		return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": string(data)}}}
 
 	default:
-		return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": "Unknown tool"}}, "isError": true}
+		return mcpError("Unknown tool")
+	}
+}
+
+// mcpError is a helper for returning MCP tool errors.
+func mcpError(msg string) map[string]interface{} {
+	return map[string]interface{}{
+		"content": []map[string]string{{"type": "text", "text": msg}},
+		"isError": true,
 	}
 }
