@@ -31,14 +31,12 @@ builds:
 
 archives:
   - id: default
-    formats:
-      - tar.gz
+    format: tar.gz
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
-    formats_overrides:
+    format_overrides:
       - goos: windows
-        formats:
-          - zip
+        format: zip
 
 checksum:
   name_template: 'checksums.txt'
