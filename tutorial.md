@@ -674,6 +674,230 @@ curl -s -X POST http://mcp.localhost:7777/mcp/message \\
 - Ephemeral tokens auto-revoke when their PID exits
 - To regenerate admin token: `rm ~/.localias/mcp-token && localias proxy stop && localias proxy start`
 
+### Example: Agent Discovers and Uses Routes
+
+This walkthrough shows how an AI agent (or any automated tool) can launch a service, discover it via MCP, and interact with it — all without hardcoding ports or URLs.
+
+#### Scenario
+
+An AI coding agent needs to:
+1. Start a backend API server
+2. Discover its URL automatically
+3. Run health checks
+4. Make requests to the discovered endpoint
+
+#### Step 1: Agent launches the service
+
+```bash
+# The agent runs the backend through localias
+localias run -- node server.js
+```
+
+Output:
+```
+→ http://my-api.localhost:7777
+  Backend: 127.0.0.1:4000
+```
+
+Behind the scenes, `localias run` also:
+- Creates an **ephemeral scoped token** for `my-api` with `read` + `health` capabilities
+- Injects `LOCALIAS_MCP_TOKEN` and `LOCALIAS_MCP_URL` into the child process environment
+- The token auto-revokes when the process exits
+
+#### Step 2: Agent discovers the route via MCP
+
+The child process (or a sibling agent reading the same env) uses the injected token:
+
+```bash
+# Read the injected credentials
+TOKEN=$LOCALIAS_MCP_TOKEN
+MCP_URL=$LOCALIAS_MCP_URL  # http://mcp.localhost:7777
+
+# Discover routes visible to this token
+curl -s -X POST "$MCP_URL/mcp/message" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "list_routes",
+      "arguments": {}
+    }
+  }'
+```
+
+Response (only shows routes this token is scoped to):
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "content": [{
+      "type": "text",
+      "text": "[{\"name\":\"my-api\",\"url\":\"http://my-api.localhost:7777\",\"backend_port\":4000,\"healthy\":true,\"latency\":\"2.1ms\"}]"
+    }]
+  }
+}
+```
+
+> **Key point:** The agent only sees `my-api` — not other developers' routes. A different agent launched with a different `localias run` would only see its own route.
+
+#### Step 3: Agent checks health before using the service
+
+```bash
+curl -s -X POST "$MCP_URL/mcp/message" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/call",
+    "params": {
+      "name": "health_check",
+      "arguments": {"name": "my-api"}
+    }
+  }'
+```
+
+Response:
+```json
+{
+  "result": {
+    "content": [{
+      "type": "text",
+      "text": "{\"healthy\":true,\"latency\":\"1.8ms\",\"last_check\":\"10:45:02\"}"
+    }]
+  }
+}
+```
+
+#### Step 4: Agent uses the discovered URL
+
+Now the agent can make requests to `http://my-api.localhost:7777` — no hardcoded ports.
+
+```bash
+# The agent hits the discovered endpoint
+curl http://my-api.localhost:7777/api/users
+```
+
+#### Full Python Agent Example
+
+Here's a complete Python script showing an agent that discovers and uses localias routes:
+
+```python
+#!/usr/bin/env python3
+"""Example: AI agent that discovers local services via localias MCP."""
+
+import json
+import os
+import urllib.request
+
+# Read credentials injected by `localias run`
+MCP_TOKEN = os.environ.get("LOCALIAS_MCP_TOKEN")
+MCP_URL = os.environ.get("LOCALIAS_MCP_URL", "http://mcp.localhost:7777")
+
+def mcp_call(method, params=None):
+    """Make a JSON-RPC call to the localias MCP server."""
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": method,
+    }
+    if params:
+        payload["params"] = params
+
+    req = urllib.request.Request(
+        f"{MCP_URL}/mcp/message",
+        data=json.dumps(payload).encode(),
+        headers={
+            "Authorization": f"Bearer {MCP_TOKEN}",
+            "Content-Type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(req) as resp:
+        return json.loads(resp.read())
+
+# 1. Discover what routes this agent can see
+routes_resp = mcp_call("tools/call", {
+    "name": "list_routes",
+    "arguments": {},
+})
+routes = json.loads(routes_resp["result"]["content"][0]["text"])
+
+print(f"Discovered {len(routes)} route(s):")
+for route in routes:
+    status = "✅" if route.get("healthy") else "❌"
+    print(f"  {status} {route['name']} → {route['url']} (port {route['backend_port']})")
+
+# 2. Check health of each route
+for route in routes:
+    health_resp = mcp_call("tools/call", {
+        "name": "health_check",
+        "arguments": {"name": route["name"]},
+    })
+    health = json.loads(health_resp["result"]["content"][0]["text"])
+    print(f"\n  Health: {route['name']}")
+    print(f"    Healthy: {health['healthy']}")
+    print(f"    Latency: {health['latency']}")
+
+# 3. Use the discovered URL
+for route in routes:
+    if route.get("healthy"):
+        print(f"\n→ Making request to {route['url']}/api/status")
+        try:
+            with urllib.request.urlopen(f"{route['url']}/api/status") as resp:
+                print(f"  Response: {resp.status} {resp.read().decode()[:200]}")
+        except Exception as e:
+            print(f"  Error: {e}")
+```
+
+Run it:
+```bash
+# Launch the service + agent together
+localias run -- node server.js &
+
+# Run the agent script (reads LOCALIAS_MCP_TOKEN from env)
+python3 agent.py
+
+# Output:
+# Discovered 1 route(s):
+#   ✅ my-api → http://my-api.localhost:7777 (port 4000)
+#
+#   Health: my-api
+#     Healthy: True
+#     Latency: 1.8ms
+#
+# → Making request to http://my-api.localhost:7777/api/status
+#   Response: 200 {"status":"ok"}
+```
+
+#### Multi-Agent Isolation
+
+When multiple agents run simultaneously, each only sees its own routes:
+
+```bash
+# Terminal 1 — Frontend agent
+localias run -- npm run dev
+# Gets token scoped to "frontend" only
+
+# Terminal 2 — API agent
+localias run -- go run ./api
+# Gets token scoped to "api" only
+
+# Terminal 3 — Admin with full access
+TOKEN=$(cat ~/.localias/mcp-token)
+# Admin token sees ALL routes
+```
+
+Each agent's `list_routes` call returns different results based on its token scope:
+- Frontend agent sees: `[{name: "frontend", ...}]`
+- API agent sees: `[{name: "api", ...}]`
+- Admin sees: `[{name: "frontend", ...}, {name: "api", ...}]`
+
+This is the key insight: **agents can only discover what they're authorized to touch.**
+
 ---
 
 ## Environment Variables

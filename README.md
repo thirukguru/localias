@@ -185,6 +185,29 @@ localias mcp token revoke a3f2
 
 **Available tools:** `list_routes`, `get_route`, `register_route`, `health_check`
 
+### Agent Discovery Example
+
+```bash
+# 1. An agent starts a service — gets a scoped token automatically
+localias run -- node server.js
+# → http://my-api.localhost:7777
+# → Injects LOCALIAS_MCP_TOKEN + LOCALIAS_MCP_URL into env
+
+# 2. Agent discovers its route via MCP (only sees its own routes)
+curl -s -X POST "$LOCALIAS_MCP_URL/mcp/message" \
+  -H "Authorization: Bearer $LOCALIAS_MCP_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_routes","arguments":{}}}'
+# → [{"name":"my-api","url":"http://my-api.localhost:7777","healthy":true}]
+
+# 3. Agent uses the discovered URL — no hardcoded ports
+curl http://my-api.localhost:7777/api/users
+```
+
+**Multi-agent isolation** — each `localias run` gets its own scoped token. Agent A can't see Agent B's routes. Admin token (`~/.localias/mcp-token`) sees everything.
+
+See [tutorial.md](tutorial.md#example-agent-discovers-and-uses-routes) for a complete Python agent example.
+
 ## Architecture
 
 ```
