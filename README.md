@@ -17,6 +17,8 @@
 - **Traffic Logging** — Last 1000 requests in a ring buffer
 - **Profiles** — Multi-service orchestration via `localias.yaml`
 - **MCP Server** — AI agents can discover routes via MCP protocol
+- **Scoped Tokens** — Per-route, per-capability auth for agent isolation
+- **Conflict Detection** — Warns when two projects compete for the same route name
 - **LAN Sharing** — Share with teammates via mDNS
 - **Smart Detection** — Auto-infers project name from package.json, go.mod, or git
 

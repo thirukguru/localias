@@ -1002,6 +1002,27 @@ Or use profiles for a single-command start:
 localias profile start
 ```
 
+### Route name conflict?
+
+If two projects share the same inferred name (e.g. both have `"name": "app"` in package.json), you'll see:
+
+```
+⚠ warning: route "app" was already registered by PID 12345 (npm run dev) — taking over
+  Use 'localias <name> -- <cmd>' to set an explicit name and avoid collisions.
+```
+
+**Fix it** by giving one project an explicit name:
+```bash
+# Instead of:
+localias run -- npm run dev
+
+# Use:
+localias frontend -- npm run dev
+localias backend -- go run .
+```
+
+The name is inferred from `package.json` → `go.mod` → git remote → directory name. If multiple projects resolve to the same name, the last one wins and the previous route is taken over. The warning tells you exactly which PID and command was displaced.
+
 ---
 
 ## Command Reference (Quick)
