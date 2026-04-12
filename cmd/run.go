@@ -94,6 +94,13 @@ func runWithName(name string, args []string) error {
 		return fmt.Errorf("registering route: %w", err)
 	}
 
+	// Warn about route name conflict
+	if result.ConflictPID > 0 {
+		fmt.Fprintf(os.Stderr, "⚠ warning: route %q was already registered by PID %d (%s) — taking over\n",
+			name, result.ConflictPID, result.ConflictCmd)
+		fmt.Fprintf(os.Stderr, "  Use 'localias <name> -- <cmd>' to set an explicit name and avoid collisions.\n")
+	}
+
 	// Issue ephemeral scoped MCP token for this route
 	var mcpToken string
 	tokenResult, err := client.MCPTokenCreate(

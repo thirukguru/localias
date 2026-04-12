@@ -108,6 +108,10 @@ func runProfileStart(cmd *cobra.Command, args []string) error {
 			fmt.Printf("%sError registering: %v\n", prefix, err)
 			continue
 		}
+		if result.ConflictPID > 0 {
+			fmt.Fprintf(os.Stderr, "%s⚠ warning: route %q was already registered by PID %d — taking over\n",
+				prefix, svc.Name, result.ConflictPID)
+		}
 		fmt.Printf("%s→ %s (port %d)\n", prefix, result.URL, appPort)
 
 		// Start child process

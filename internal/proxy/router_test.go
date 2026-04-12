@@ -12,7 +12,7 @@ import (
 func TestRouteTable_Register(t *testing.T) {
 	rt := NewRouteTable(7777, false, "")
 
-	r, err := rt.Register("myapp", 4231, 1234, "npm run dev")
+	r, _, err := rt.Register("myapp", 4231, 1234, "npm run dev")
 	if err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestRouteTable_Register(t *testing.T) {
 
 func TestRouteTable_Register_EmptyName(t *testing.T) {
 	rt := NewRouteTable(7777, false, "")
-	_, err := rt.Register("", 4231, 0, "")
+	_, _, err := rt.Register("", 4231, 0, "")
 	if err == nil {
 		t.Error("expected error for empty name, got nil")
 	}
@@ -40,7 +40,7 @@ func TestRouteTable_Register_EmptyName(t *testing.T) {
 
 func TestRouteTable_Register_HTTPS(t *testing.T) {
 	rt := NewRouteTable(7777, true, "")
-	r, err := rt.Register("myapp", 4231, 0, "")
+	r, _, err := rt.Register("myapp", 4231, 0, "")
 	if err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestRouteTable_Register_HTTPS(t *testing.T) {
 
 func TestRouteTable_Deregister(t *testing.T) {
 	rt := NewRouteTable(7777, false, "")
-	rt.Register("myapp", 4231, 0, "")
+	rt.Register("myapp", 4231, 0, "") //nolint:errcheck
 
 	rt.Deregister("myapp")
 	if rt.Has("myapp") {
@@ -237,7 +237,7 @@ func TestRouteTable_ConcurrentAccess(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			name := "app" + string(rune('a'+i%26))
-			rt.Register(name, 4000+i, 0, "")
+			rt.Register(name, 4000+i, 0, "") //nolint:errcheck
 		}(i)
 	}
 

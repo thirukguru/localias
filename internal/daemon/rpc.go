@@ -48,7 +48,9 @@ type RegisterParams struct {
 
 // RegisterResult is the result of the "register" RPC method.
 type RegisterResult struct {
-	URL string `json:"url"`
+	URL         string `json:"url"`
+	ConflictPID int    `json:"conflict_pid,omitempty"`
+	ConflictCmd string `json:"conflict_cmd,omitempty"`
 }
 
 // AliasParams are the parameters for the "alias" RPC method.

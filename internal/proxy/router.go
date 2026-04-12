@@ -52,17 +52,36 @@ func NewRouteTable(proxyPort int, https bool, persistPath string) *RouteTable {
 	return rt
 }
 
+// Conflict describes an overwritten route for warning purposes.
+type Conflict struct {
+	PrevPID  int    `json:"prev_pid"`
+	PrevCmd  string `json:"prev_cmd"`
+	PrevPort int    `json:"prev_port"`
+}
+
 // Register adds or updates a route in the table.
-func (rt *RouteTable) Register(name string, port int, pid int, cmd string) (*Route, error) {
+// If the name is already registered by a different PID, the returned Conflict
+// is non-nil so callers can warn about the takeover.
+func (rt *RouteTable) Register(name string, port int, pid int, cmd string) (*Route, *Conflict, error) {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 
 	name = strings.ToLower(name)
 	if name == "" {
-		return nil, fmt.Errorf("route name cannot be empty")
+		return nil, nil, fmt.Errorf("route name cannot be empty")
 	}
 	if !validNameRegex.MatchString(name) {
-		return nil, fmt.Errorf("route name %q contains invalid characters (only a-z, 0-9, hyphens, and dots allowed)", name)
+		return nil, nil, fmt.Errorf("route name %q contains invalid characters (only a-z, 0-9, hyphens, and dots allowed)", name)
+	}
+
+	// Detect conflict: different PID overwriting an existing route
+	var conflict *Conflict
+	if existing, ok := rt.routes[name]; ok && existing.PID != pid {
+		conflict = &Conflict{
+			PrevPID:  existing.PID,
+			PrevCmd:  existing.Cmd,
+			PrevPort: existing.Port,
+		}
 	}
 
 	scheme := "http"
@@ -80,7 +99,7 @@ func (rt *RouteTable) Register(name string, port int, pid int, cmd string) (*Rou
 		CreatedAt: time.Now(),
 	}
 	rt.routes[name] = r
-	return r, nil
+	return r, conflict, nil
 }
 
 // Alias adds a static route (for Docker, external processes, etc.).

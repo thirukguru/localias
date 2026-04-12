@@ -33,7 +33,7 @@ func setupTestRPC(t *testing.T) (*RPCServer, *Client, *proxy.RouteTable, context
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, err
 		}
-		r, err := routes.Register(p.Name, p.Port, p.PID, p.Cmd)
+		r, _, err := routes.Register(p.Name, p.Port, p.PID, p.Cmd)
 		if err != nil {
 			return nil, err
 		}

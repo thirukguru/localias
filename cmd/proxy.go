@@ -194,14 +194,23 @@ func registerRPCHandlers(rpcServer *daemon.RPCServer, routes *proxy.RouteTable, 
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, err
 		}
-		r, err := routes.Register(p.Name, p.Port, p.PID, p.Cmd)
+		r, conflict, err := routes.Register(p.Name, p.Port, p.PID, p.Cmd)
 		if err != nil {
 			return nil, err
 		}
 		// Start health checking for the new route
 		hc.StartChecking(p.Name, p.Port)
+		if conflict != nil {
+			logger.Warn("route takeover: name already registered by another process",
+				"name", p.Name, "new_pid", p.PID, "prev_pid", conflict.PrevPID, "prev_cmd", conflict.PrevCmd)
+		}
 		logger.Info("route registered", "name", p.Name, "port", p.Port)
-		return daemon.RegisterResult{URL: r.URL}, nil
+		result := daemon.RegisterResult{URL: r.URL}
+		if conflict != nil {
+			result.ConflictPID = conflict.PrevPID
+			result.ConflictCmd = conflict.PrevCmd
+		}
+		return result, nil
 	})
 
 	rpcServer.Handle("deregister", func(params json.RawMessage) (interface{}, error) {
